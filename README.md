@@ -64,11 +64,11 @@ The frontend makes calls to the following API endpoints:
 
 - **POST /login**: User authentication
 - **POST /register**: New user registration
-- **POST /contacts**: Save emergency contacts
-- **GET /api/contacts**: Retrieve user's emergency contacts
-- **POST /api/alert**: Create a new alert
-- **GET /api/alerts**: Retrieve user's alert history
-- **POST /api/refresh-token**: Refresh authentication token
+- **POST /emergency**: Save emergency contacts
+- **GET /contacts**: Retrieve user's emergency contacts
+- **POST /alerts**: Create a new alert
+- **GET /alerts**: Retrieve user's alert history
+
 
 ## Mobile Enhancements
 - Pull-to-refresh functionality for alert history

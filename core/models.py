@@ -16,6 +16,9 @@ class EmergencyContact(BaseModel):
     email: Optional[EmailStr]
     is_primary: bool = False
 
+class EmergencyContactsPayload(BaseModel):
+    contacts: List[EmergencyContact]
+    
 class Location(BaseModel):
     latitude: float
     longitude: float

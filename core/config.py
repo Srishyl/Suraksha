@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional, Set
+from typing import Optional, Set, ClassVar
 from functools import lru_cache
 
 
@@ -33,7 +33,10 @@ class GlobalConfig(BaseConfig):
     ALLOWED_EXTENSIONS: Set[str] = {"webm", "mp4", "wav", "mp3"}
 
     # ---------------- AUDIO ----------------
-    RISK_KEYWORDS: list[str] = ["risk", "risky", "high risk"]
+    RISK_KEYWORDS: ClassVar[dict] = {
+        "high": ["help", "save me", "stop", "leave me", "don't touch"],
+        "medium": ["scared", "follow", "unsafe", "afraid"]
+    }
 
     # ---------------- EMAIL ----------------
     EMAIL_SENDER: Optional[str] = None

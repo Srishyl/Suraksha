@@ -3,28 +3,76 @@ from datetime import datetime
 import uuid
 from database import contacts_collection, alerts_collection
 import os
+from models import EmergencyContactsPayload
+import uuid
 from security import get_current_user
+from utils.emergency import handle_emergency
+from utils.audio import calculate_final_risk, detect_scream
+import json
 import shutil
 from config import config
 
 router = APIRouter()
 
-@router.post("/contacts")
-def save_contacts(
-    payload: dict,
+@router.post("/emergency")
+def add_emergency_contacts(
+    payload: EmergencyContactsPayload,
     current_user=Depends(get_current_user)
 ):
     user_id = str(current_user["_id"])
 
-    # Remove existing contacts for user
-    contacts_collection.delete_many({"user_id": user_id})
+    for contact in payload.contacts:
+        data = contact.model_dump(exclude_unset=True)
 
-    for c in payload.get("contacts", []):
-        c["_id"] = str(uuid.uuid4())
-        c["user_id"] = user_id
-        contacts_collection.insert_one(c)
+        # Identify contact uniquely (phone OR email)
+        query = {
+            "user_id": user_id,
+            "$or": [
+                {"phone": data.get("phone")},
+                {"email": data.get("email")}
+            ]
+        }
+
+        existing = contacts_collection.find_one(query)
+
+        # Enforce only one primary contact
+        if data.get("is_primary"):
+            contacts_collection.update_many(
+                {"user_id": user_id},
+                {"$set": {"is_primary": False}}
+            )
+
+        if existing:
+            contacts_collection.update_one(
+                {"_id": existing["_id"]},
+                {"$set": data}
+            )
+        else:
+            contacts_collection.insert_one({
+                "_id": str(uuid.uuid4()),
+                "user_id": user_id,
+                **data
+            })
 
     return {"success": True}
+
+@router.get("/contacts")
+def get_emergency_contacts(
+    current_user=Depends(get_current_user)
+):
+    user_id = str(current_user["_id"])
+
+    contacts = list(
+        contacts_collection.find(
+            {"user_id": user_id},
+            {"_id": 0, "user_id": 0}
+        )
+    )
+
+    return {
+        "count": len(contacts),
+        "contacts": contacts
+    }
 
 
 @router.get("/alerts")
@@ -43,45 +91,61 @@ def get_alerts(
     return {"success": True, "alerts": alerts}
 
 
-@router.post("/upload_video")
-def upload_video(
+@router.post("/alerts")
+def create_alert(
     video: UploadFile = File(...),
-    location: str = Form(...),
-    risk_level: str = Form(""),
+    audio: UploadFile = File(...),
+    location: str = Form(...),  # JSON string
+    risk_level: str = Form(""),  # optional override
     current_user=Depends(get_current_user)
 ):
     user_id = str(current_user["_id"])
 
-    # Validate extension
-    ext = video.filename.split(".")[-1].lower()
-    if ext not in config.ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="File type not allowed")
-
-    # Validate size
-    max_size = config.MAX_FILE_SIZE_MB * 1024 * 1024
-    video.file.seek(0, os.SEEK_END)
-    size = video.file.tell()
-    video.file.seek(0)
-
-    if size > max_size:
-        raise HTTPException(status_code=400, detail="File too large")
-
-    # Ensure upload dir exists
+    # ---------- Save video ----------
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+    video_name = f"{uuid.uuid4()}_{video.filename}"
+    video_path = os.path.join(config.UPLOAD_DIR, video_name)
 
-    filename = f"{uuid.uuid4()}_{video.filename}"
-    path = os.path.join(config.UPLOAD_DIR, filename)
-
-    with open(path, "wb") as f:
+    with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
 
-    alerts_collection.insert_one({
-        "_id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "video_path": path,
-        "location": location,
-        "risk_level": risk_level,
-        "timestamp": datetime.utcnow()
-    })
+    # ---------- Save audio ----------
+    audio_name = f"{uuid.uuid4()}_{audio.filename}"
+    audio_path = os.path.join(config.UPLOAD_DIR, audio_name)
 
-    return {"success": True, "video_path": path}
+    with open(audio_path, "wb") as f:
+        shutil.copyfileobj(audio.file, f)
+
+    # ---------- Parse location ----------
+    try:
+        location_data = json.loads(location)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid location")
+
+    # ---------- Audio-based risk analysis ----------
+
+    detected_risk = calculate_final_risk(audio_path)
+    scream_detected = detect_scream(audio_path)
+
+    # Allow manual risk override only if provided
+    final_risk = risk_level.upper() if risk_level else detected_risk
+
+    # ---------- Handle emergency ----------
+    result = handle_emergency(
+        user_id=user_id,
+        risk_level=final_risk,
+        location=location_data,
+        video_path=video_path,
+        keywords=[],  # no longer used, kept for compatibility
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+
+    return {
+        "success": True,
+        "alert_id": result["alert_id"],
+        "risk_level": final_risk,
+        "scream_detected": scream_detected,
+        "actions": result["actions"]
+    }
