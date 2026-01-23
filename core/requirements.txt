@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-dotenv
+pymongo
+python-multipart
+speechrecognition
+numpy
+soundfile
+geopy
+twilio
+requests
+email-validator
+passlib[bcrypt]
+pyjwt
