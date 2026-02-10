@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Custom gradients or overrides */
+@theme {
+  --font-sans: "Inter", "system-ui", "sans-serif";
+}
+
+body {
+  @apply bg-gradient-to-br from-indigo-900 to-purple-800 min-h-screen font-sans;
+}

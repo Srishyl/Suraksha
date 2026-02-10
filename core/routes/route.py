@@ -93,28 +93,34 @@ def get_alerts(
 
 @router.post("/alerts")
 def create_alert(
-    video: UploadFile = File(...),
-    audio: UploadFile = File(...),
+    video: UploadFile = File(None),
+    audio: UploadFile = File(None),
     location: str = Form(...),  # JSON string
     risk_level: str = Form(""),  # optional override
     current_user=Depends(get_current_user)
 ):
     user_id = str(current_user["_id"])
+    
+    video_path = None
+    audio_path = None
 
     # ---------- Save video ----------
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
-    video_name = f"{uuid.uuid4()}_{video.filename}"
-    video_path = os.path.join(config.UPLOAD_DIR, video_name)
+    
+    if video:
+        video_name = f"{uuid.uuid4()}_{video.filename}"
+        video_path = os.path.join(config.UPLOAD_DIR, video_name)
 
-    with open(video_path, "wb") as f:
-        shutil.copyfileobj(video.file, f)
+        with open(video_path, "wb") as f:
+            shutil.copyfileobj(video.file, f)
 
     # ---------- Save audio ----------
-    audio_name = f"{uuid.uuid4()}_{audio.filename}"
-    audio_path = os.path.join(config.UPLOAD_DIR, audio_name)
+    if audio:
+        audio_name = f"{uuid.uuid4()}_{audio.filename}"
+        audio_path = os.path.join(config.UPLOAD_DIR, audio_name)
 
-    with open(audio_path, "wb") as f:
-        shutil.copyfileobj(audio.file, f)
+        with open(audio_path, "wb") as f:
+            shutil.copyfileobj(audio.file, f)
 
     # ---------- Parse location ----------
     try:
@@ -123,9 +129,15 @@ def create_alert(
         raise HTTPException(status_code=400, detail="Invalid location")
 
     # ---------- Audio-based risk analysis ----------
-
-    detected_risk = calculate_final_risk(audio_path)
-    scream_detected = detect_scream(audio_path)
+    detected_risk = "RISK" # Default low risk if no audio
+    scream_detected = False
+    
+    if audio_path:
+        try:
+            detected_risk = calculate_final_risk(audio_path)
+            scream_detected = detect_scream(audio_path)
+        except Exception as e:
+            print(f"Error processing audio: {e}")
 
     # Allow manual risk override only if provided
     final_risk = risk_level.upper() if risk_level else detected_risk
