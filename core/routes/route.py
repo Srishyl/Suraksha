@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, BackgroundTasks
 from datetime import datetime
 import uuid
 from database import contacts_collection, alerts_collection
@@ -93,71 +93,48 @@ def get_alerts(
 
 @router.post("/alerts")
 def create_alert(
-    video: UploadFile = File(None),
-    audio: UploadFile = File(None),
-    location: str = Form(...),  # JSON string
-    risk_level: str = Form(""),  # optional override
+    background_tasks: BackgroundTasks,
+    video: UploadFile = File(...),
+    audio: UploadFile = File(...),
+    location: str = Form(...),
     current_user=Depends(get_current_user)
 ):
     user_id = str(current_user["_id"])
-    
-    video_path = None
-    audio_path = None
 
-    # ---------- Save video ----------
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
-    
-    if video:
-        video_name = f"{uuid.uuid4()}_{video.filename}"
-        video_path = os.path.join(config.UPLOAD_DIR, video_name)
 
-        with open(video_path, "wb") as f:
-            shutil.copyfileobj(video.file, f)
+    # 🎥 Save video
+    video_name = f"{uuid.uuid4()}_{video.filename}"
+    video_path = os.path.join(config.UPLOAD_DIR, video_name)
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(video.file, f)
 
-    # ---------- Save audio ----------
-    if audio:
-        audio_name = f"{uuid.uuid4()}_{audio.filename}"
-        audio_path = os.path.join(config.UPLOAD_DIR, audio_name)
+    # 🎙 Save audio
+    audio_name = f"{uuid.uuid4()}_{audio.filename}"
+    audio_path = os.path.join(config.UPLOAD_DIR, audio_name)
+    with open(audio_path, "wb") as f:
+        shutil.copyfileobj(audio.file, f)
 
-        with open(audio_path, "wb") as f:
-            shutil.copyfileobj(audio.file, f)
-
-    # ---------- Parse location ----------
+    # 📍 Parse location
     try:
         location_data = json.loads(location)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid location")
+        raise HTTPException(status_code=400, detail="Invalid location format")
 
-    # ---------- Audio-based risk analysis ----------
-    detected_risk = "RISK" # Default low risk if no audio
-    scream_detected = False
-    
-    if audio_path:
-        try:
-            detected_risk = calculate_final_risk(audio_path)
-            scream_detected = detect_scream(audio_path)
-        except Exception as e:
-            print(f"Error processing audio: {e}")
+    # ⚠️ Calculate risk
+    final_risk = calculate_final_risk(audio_path)
 
-    # Allow manual risk override only if provided
-    final_risk = risk_level.upper() if risk_level else detected_risk
-
-    # ---------- Handle emergency ----------
+    # 🚨 Handle emergency
     result = handle_emergency(
         user_id=user_id,
         risk_level=final_risk,
         location=location_data,
         video_path=video_path,
-        keywords=[],  # no longer used, kept for compatibility
+        keywords=[],
+        background_tasks=background_tasks
     )
 
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])
 
-    return {
-        "success": True,
-        "alert_id": result["alert_id"],
-        "risk_level": final_risk,
-        "scream_detected": scream_detected,
-        "actions": result["actions"]
-    }
+    return result
